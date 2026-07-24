@@ -171,6 +171,22 @@ def check_amp():
     
     return jsonify({"results": results})
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the actual error to Render's console so you can debug it
+    print(f"CRITICAL ERROR: {str(e)}")
+    return jsonify({
+        "error": f"Internal Server Error: {str(e)}"
+    }), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "Method not allowed"}), 405
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)

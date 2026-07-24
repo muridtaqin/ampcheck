@@ -87,23 +87,30 @@
                     body: JSON.stringify({ urls })
                 });
 
-                const data = await response.json();
-                currentResults = data.results;
+                // Check if the response is actually OK (status 200-299)
+                if (!response.ok) {
+                    const errorText = await response.text(); // Read raw text (might be HTML error page)
+                    throw new Error(`Server returned ${response.status}: ${errorText.substring(0, 100)}`);
+                }
+
+                const data = await response.json(); // Now safe to parse as JSON
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                currentResults = data.results || [];
                 renderTable(currentResults);
                 downloadBtn.classList.remove('hidden');
                 statusMsg.textContent = `Successfully checked ${currentResults.length} URLs.`;
+                statusMsg.classList.remove('text-red-600');
+                
             } catch (error) {
-            const errorMsg = error.message || 'Unknown error';
-            statusMsg.textContent = `Error: ${errorMsg}. Check browser console (F12) for details.`;
-            statusMsg.classList.remove('hidden');
-            statusMsg.classList.add('text-red-600');
-            console.error('Full error:', error);
-            
-            // Try to get more details if it's a fetch error
-            if (error instanceof TypeError && error.message.includes('fetch')) {
-                statusMsg.textContent = `Network error: Cannot reach the API. The service might be sleeping (Render free tier). Try again in 30 seconds.`;
-            }
-        } finally {
+                console.error('Full error:', error);
+                statusMsg.textContent = `Error: ${error.message}. Check browser console (F12) for details.`;
+                statusMsg.classList.remove('hidden');
+                statusMsg.classList.add('text-red-600');
+            } finally {
                 btn.disabled = false;
                 btn.innerHTML = 'Check AMP';
             }

@@ -11,72 +11,46 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Read keys from Render Environment Variables
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "3fa7a3a17dd32d0cb50e2af662b49d5d")
 SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "NBGHXBWL8XKOXHWHA103T6SZDEIYRA3TXXA5NZOHXN4HNJPAA6DLY23DGOZBRO4DF83QWNB59XN3X9U1")
 
 def fetch_with_fallback(target_url):
-    """
-    Tries ScraperAPI first, then ScrapingBee.
-    """
     providers = []
     
-    # 1. ScraperAPI
     if SCRAPERAPI_KEY:
         providers.append({
             "name": "ScraperAPI",
             "url": "http://api.scraperapi.com",
-            "params": {
-                "api_key": SCRAPERAPI_KEY,
-                "url": target_url,
-                "render": "true",
-                "country_code": "us"
-            }
+            "params": {"api_key": SCRAPERAPI_KEY, "url": target_url, "render": "true", "country_code": "us"}
         })
         
-    # 2. ScrapingBee
     if SCRAPINGBEE_KEY:
         providers.append({
             "name": "ScrapingBee",
             "url": "https://app.scrapingbee.com/api/v1/",
-            "params": {
-                "api_key": SCRAPINGBEE_KEY,
-                "url": target_url,
-                "render_js": "true",
-                "premium_proxy": "true"
-            }
+            "params": {"api_key": SCRAPINGBEE_KEY, "url": target_url, "render_js": "true", "premium_proxy": "true"}
         })
 
     if not providers:
-        raise Exception("No scraping API keys configured")
-
-    last_error = "Unknown error"
+        raise Exception("No scraping API keys configured in Render Environment Variables")
 
     for provider in providers:
         try:
-            # Reduced timeout to 15 seconds to avoid 502 errors
             response = requests.get(provider["url"], params=provider["params"], timeout=15)
             
             if response.status_code in [401, 402, 403, 429, 500]:
-                last_error = f"{provider['name']} failed (Status: {response.status_code})"
                 continue
             
             if response.status_code == 200:
                 text_lower = response.text.lower()
-                if "cf-browser-verification" in text_lower or "just a moment" in text_lower or "captcha" in text_lower:
-                    last_error = f"{provider['name']} returned a Cloudflare block page"
+                if "cf-browser-verification" in text_lower or "just a moment" in text_lower:
                     continue
-                
                 return response.text
-                
-        except requests.exceptions.Timeout:
-            last_error = f"{provider['name']} timed out"
-            continue
-        except Exception as e:
-            last_error = f"{provider['name']} error: {str(e)}"
+        except Exception:
             continue
 
-    raise Exception(f"All providers failed. Last error: {last_error}")
-
+    raise Exception("All scraping providers failed or returned Cloudflare blocks")
 
 @app.route('/')
 def index():
@@ -84,7 +58,8 @@ def index():
 
 @app.route('/api/health')
 def health():
-    return jsonify({"status": "ok", "providers_configured": sum([bool(SCRAPERAPI_KEY), bool(SCRAPINGBEE_KEY)])})
+    keys_count = sum([bool(SCRAPERAPI_KEY), bool(SCRAPINGBEE_KEY)])
+    return jsonify({"status": "ok", "providers_configured": keys_count})
 
 @app.route('/api/check', methods=['POST', 'GET', 'OPTIONS'])
 def check_amp():
@@ -108,40 +83,23 @@ def check_amp():
         return jsonify({"error": "Missing URLs"}), 400
     
     results = []
-    
     for url in urls:
         url = url.strip()
-        if not url:
-            continue
+        if not url: continue
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
         
         try:
             html_content = fetch_with_fallback(url)
-            
             soup = BeautifulSoup(html_content, 'html.parser')
             amp_tag = soup.find('link', rel='amphtml')
             
             if amp_tag and amp_tag.get('href'):
-                results.append({
-                    "source_url": url,
-                    "amp_url": urljoin(url, amp_tag['href']),
-                    "status": "found"
-                })
+                results.append({"source_url": url, "amp_url": urljoin(url, amp_tag['href']), "status": "found"})
             else:
-                results.append({
-                    "source_url": url,
-                    "amp_url": None,
-                    "status": "not_found"
-                })
-                
+                results.append({"source_url": url, "amp_url": None, "status": "not_found"})
         except Exception as e:
-            results.append({
-                "source_url": url,
-                "amp_url": None,
-                "status": "error",
-                "error": str(e)
-            })
+            results.append({"source_url": url, "amp_url": None, "status": "error", "error": str(e)})
         
         time.sleep(0.3)
     

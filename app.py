@@ -67,7 +67,7 @@ def check_amp():
             time.sleep(0.5)
             
             # UPGRADED: chrome124 has a much better success rate against modern Cloudflare
-            api_key = "YOUR_FREE_SCRAPEOPS_API_KEY"
+            api_key = "d6e07a45-ac7f-41b5-acf3-f3ffbe896130"
            proxy_url = f"http://proxy.scrapeops.io/v1/?api_key={api_key}&url={url}"
            
            # Use standard requests here, ScrapeOps handles the Cloudflare bypass

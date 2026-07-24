@@ -60,61 +60,75 @@
         let currentResults = [];
 
         async function checkAmp() {
-            const input = document.getElementById('urlInput').value;
-            const urls = input.split('\n').map(u => u.trim()).filter(u => u.length > 0);
-            
-            if (urls.length === 0) {
-                alert('Please enter at least one URL.');
-                return;
-            }
+    const input = document.getElementById('urlInput').value;
+    const urls = input.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+    
+    if (urls.length === 0) {
+        alert('Please enter at least one URL.');
+        return;
+    }
 
-            const btn = document.getElementById('checkBtn');
-            const statusMsg = document.getElementById('statusMsg');
-            const tbody = document.getElementById('resultsBody');
-            const downloadBtn = document.getElementById('downloadBtn');
+    const btn = document.getElementById('checkBtn');
+    const statusMsg = document.getElementById('statusMsg');
+    const tbody = document.getElementById('resultsBody');
+    const downloadBtn = document.getElementById('downloadBtn');
 
-            btn.disabled = true;
-            btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...`;
-            statusMsg.textContent = `Processing ${urls.length} URLs. Please wait...`;
-            statusMsg.classList.remove('hidden');
-            tbody.innerHTML = '<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">Scraping in progress...</td></tr>';
-            downloadBtn.classList.add('hidden');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...`;
+    statusMsg.textContent = `Processing ${urls.length} URLs. Service may be waking up (30-50s)...`;
+    statusMsg.classList.remove('hidden');
+    tbody.innerHTML = '<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">Scraping in progress...</td></tr>';
+    downloadBtn.classList.add('hidden');
 
-            try {
-                const response = await fetch('/api/check', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ urls })
-                });
+    try {
+        // Create an AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-                // Check if the response is actually OK (status 200-299)
-                if (!response.ok) {
-                    const errorText = await response.text(); // Read raw text (might be HTML error page)
-                    throw new Error(`Server returned ${response.status}: ${errorText.substring(0, 100)}`);
-                }
+        const response = await fetch('/api/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls }),
+            signal: controller.signal
+        });
 
-                const data = await response.json(); // Now safe to parse as JSON
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+        clearTimeout(timeoutId);
 
-                currentResults = data.results || [];
-                renderTable(currentResults);
-                downloadBtn.classList.remove('hidden');
-                statusMsg.textContent = `Successfully checked ${currentResults.length} URLs.`;
-                statusMsg.classList.remove('text-red-600');
-                
-            } catch (error) {
-                console.error('Full error:', error);
-                statusMsg.textContent = `Error: ${error.message}. Check browser console (F12) for details.`;
-                statusMsg.classList.remove('hidden');
-                statusMsg.classList.add('text-red-600');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = 'Check AMP';
-            }
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server returned ${response.status}: ${errorText.substring(0, 100)}`);
         }
+
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        currentResults = data.results || [];
+        renderTable(currentResults);
+        downloadBtn.classList.remove('hidden');
+        statusMsg.textContent = `Successfully checked ${currentResults.length} URLs.`;
+        statusMsg.classList.remove('text-red-600');
+        
+    } catch (error) {
+        console.error('Full error:', error);
+        
+        if (error.name === 'AbortError') {
+            statusMsg.textContent = 'Request timed out (60s). The service might be sleeping. Try again in 30 seconds.';
+        } else if (error.message.includes('Failed to fetch')) {
+            statusMsg.textContent = 'Cannot connect to server. The service is likely sleeping. Wait 30 seconds and refresh the page, then try again.';
+        } else {
+            statusMsg.textContent = `Error: ${error.message}`;
+        }
+        
+        statusMsg.classList.remove('hidden');
+        statusMsg.classList.add('text-red-600');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Check AMP';
+    }
+}
 
         function renderTable(results) {
             const tbody = document.getElementById('resultsBody');

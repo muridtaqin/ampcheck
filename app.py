@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from urllib.parse import urljoin
 import requests
@@ -11,9 +11,15 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Read keys from Render Environment Variables
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "3fa7a3a17dd32d0cb50e2af662b49d5d")
 SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "NBGHXBWL8XKOXHWHA103T6SZDEIYRA3TXXA5NZOHXN4HNJPAA6DLY23DGOZBRO4DF83QWNB59XN3X9U1")
+
+# Read the HTML file once at startup to guarantee it's not empty
+try:
+    with open(os.path.join(BASE_DIR, 'index.html'), 'r', encoding='utf-8') as f:
+        HTML_CONTENT = f.read()
+except FileNotFoundError:
+    HTML_CONTENT = "<h1>Error: index.html not found in root directory</h1>"
 
 def fetch_with_fallback(target_url):
     providers = []
@@ -37,7 +43,8 @@ def fetch_with_fallback(target_url):
 
     for provider in providers:
         try:
-            response = requests.get(provider["url"], params=provider["params"], timeout=15)
+            # Increased timeout to 45s to match Gunicorn's new 120s limit
+            response = requests.get(provider["url"], params=provider["params"], timeout=45)
             
             if response.status_code in [401, 402, 403, 429, 500]:
                 continue
@@ -54,7 +61,12 @@ def fetch_with_fallback(target_url):
 
 @app.route('/')
 def index():
-    return send_file(os.path.join(BASE_DIR, 'index.html'))
+    return Response(HTML_CONTENT, mimetype='text/html')
+
+@app.route('/favicon.ico')
+def favicon():
+    # Return a 204 No Content to stop the browser from spamming 404/500 errors
+    return '', 204
 
 @app.route('/api/health')
 def health():

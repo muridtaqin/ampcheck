@@ -11,15 +11,12 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Get these from your Render Environment Variables
-SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "3fa7a3a17dd32d0cb50e2af662b49d5d")
-ZENROWS_KEY = os.environ.get("ZENROWS_KEY", "")
-SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "NBGHXBWL8XKOXHWHA103T6SZDEIYRA3TXXA5NZOHXN4HNJPAA6DLY23DGOZBRO4DF83QWNB59XN3X9U1")
+SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
+SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "")
 
 def fetch_with_fallback(target_url):
     """
-    Tries multiple scraping APIs in order. 
-    Returns the HTML text if successful, or raises an Exception if all fail.
+    Tries ScraperAPI first, then ScrapingBee.
     """
     providers = []
     
@@ -35,21 +32,8 @@ def fetch_with_fallback(target_url):
                 "country_code": "us"
             }
         })
-    
-    # 2. ZenRows
-    if ZENROWS_KEY:
-        providers.append({
-            "name": "ZenRows",
-            "url": "https://api.zenrows.com/v1/",
-            "params": {
-                "apikey": ZENROWS_KEY,
-                "url": target_url,
-                "js_render": "true",
-                "premium_proxy": "true"
-            }
-        })
         
-    # 3. ScrapingBee
+    # 2. ScrapingBee
     if SCRAPINGBEE_KEY:
         providers.append({
             "name": "ScrapingBee",
@@ -69,24 +53,19 @@ def fetch_with_fallback(target_url):
 
     for provider in providers:
         try:
-            # Scraping APIs with JS rendering can take 10-20 seconds
-            response = requests.get(provider["url"], params=provider["params"], timeout=30)
+            # Reduced timeout to 15 seconds to avoid 502 errors
+            response = requests.get(provider["url"], params=provider["params"], timeout=15)
             
-            # Check for API-level failures (Out of credits, rate limited, bad key)
             if response.status_code in [401, 402, 403, 429, 500]:
                 last_error = f"{provider['name']} failed (Status: {response.status_code})"
-                time.sleep(0.5) # Brief pause before trying next provider
                 continue
             
-            # Check if the API successfully got the page, BUT the page is still a Cloudflare block
             if response.status_code == 200:
                 text_lower = response.text.lower()
                 if "cf-browser-verification" in text_lower or "just a moment" in text_lower or "captcha" in text_lower:
                     last_error = f"{provider['name']} returned a Cloudflare block page"
-                    time.sleep(0.5)
                     continue
                 
-                # Success! We have the real HTML
                 return response.text
                 
         except requests.exceptions.Timeout:
@@ -96,7 +75,6 @@ def fetch_with_fallback(target_url):
             last_error = f"{provider['name']} error: {str(e)}"
             continue
 
-    # If we get here, all providers failed
     raise Exception(f"All providers failed. Last error: {last_error}")
 
 
@@ -106,7 +84,7 @@ def index():
 
 @app.route('/api/health')
 def health():
-    return jsonify({"status": "ok", "providers_configured": sum([bool(SCRAPERAPI_KEY), bool(ZENROWS_KEY), bool(SCRAPINGBEE_KEY)])})
+    return jsonify({"status": "ok", "providers_configured": sum([bool(SCRAPERAPI_KEY), bool(SCRAPINGBEE_KEY)])})
 
 @app.route('/api/check', methods=['POST', 'GET', 'OPTIONS'])
 def check_amp():
@@ -139,7 +117,6 @@ def check_amp():
             url = 'https://' + url
         
         try:
-            # Fetch HTML using the resilient fallback system
             html_content = fetch_with_fallback(url)
             
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -166,26 +143,14 @@ def check_amp():
                 "error": str(e)
             })
         
-        # Polite delay between URLs to avoid overwhelming the APIs
-        time.sleep(0.5)
+        time.sleep(0.3)
     
     return jsonify({"results": results})
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # Log the actual error to Render's console so you can debug it
     print(f"CRITICAL ERROR: {str(e)}")
-    return jsonify({
-        "error": f"Internal Server Error: {str(e)}"
-    }), 500
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(405)
-def method_not_allowed(e):
-    return jsonify({"error": "Method not allowed"}), 405
+    return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

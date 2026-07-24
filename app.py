@@ -1,43 +1,60 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from urllib.parse import urljoin
-import requests
+from curl_cffi import requests # <-- Upgraded to bypass 403 Cloudflare blocks
 from bs4 import BeautifulSoup
 import time
 import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Get the absolute path to the project directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.route('/')
 def index():
     return send_file(os.path.join(BASE_DIR, 'index.html'))
 
-@app.route('/api/check', methods=['POST', 'OPTIONS'])
+@app.route('/api/health')
+def health():
+    return jsonify({"status": "ok"})
+
+@app.route('/api/check', methods=['POST', 'GET', 'OPTIONS'])
 def check_amp():
-    # Handle CORS preflight
     if request.method == 'OPTIONS':
-        return '', 204
-    
+        response = app.make_default_options_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+
+    if request.method == 'GET':
+        return jsonify({"message": "Send a POST request with {'urls': ['...']}"})
+
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data received"}), 400
+        data = request.get_json(force=True)
         urls = data.get('urls', [])
     except Exception as e:
-        return jsonify({"error": f"Failed to parse JSON: {str(e)}"}), 400
+        return jsonify({"error": f"Invalid JSON: {str(e)}"}), 400
     
     if not urls:
-        return jsonify({"error": "Missing 'urls' array"}), 400
+        return jsonify({"error": "Missing URLs"}), 400
     
     results = []
+    
+    # Ultra-realistic browser headers
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0'
     }
     
     for url in urls:
@@ -48,9 +65,12 @@ def check_amp():
             url = 'https://' + url
         
         try:
-            time.sleep(0.3)
-            response = requests.get(url, headers=headers, timeout=10)
+            time.sleep(0.5) # Slightly longer delay to be polite and avoid rate limits
+            
+            # impersonate="chrome110" makes the TLS handshake look exactly like Chrome
+            response = requests.get(url, headers=headers, timeout=15, impersonate="chrome110")
             response.raise_for_status()
+            
             soup = BeautifulSoup(response.text, 'html.parser')
             amp_tag = soup.find('link', rel='amphtml')
             
@@ -75,11 +95,6 @@ def check_amp():
             })
     
     return jsonify({"results": results})
-
-# Diagnostic endpoint to test if API is alive
-@app.route('/api/health')
-def health():
-    return jsonify({"status": "ok", "message": "API is running"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

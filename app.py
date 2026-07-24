@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from urllib.parse import urljoin
-from curl_cffi import requests  # <-- Upgraded library
+import requests
 from bs4 import BeautifulSoup
 import time
 import os
@@ -11,13 +11,102 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Get these from your Render Environment Variables
+SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "3fa7a3a17dd32d0cb50e2af662b49d5d")
+ZENROWS_KEY = os.environ.get("ZENROWS_KEY", "")
+SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "NBGHXBWL8XKOXHWHA103T6SZDEIYRA3TXXA5NZOHXN4HNJPAA6DLY23DGOZBRO4DF83QWNB59XN3X9U1")
+
+def fetch_with_fallback(target_url):
+    """
+    Tries multiple scraping APIs in order. 
+    Returns the HTML text if successful, or raises an Exception if all fail.
+    """
+    providers = []
+    
+    # 1. ScraperAPI
+    if SCRAPERAPI_KEY:
+        providers.append({
+            "name": "ScraperAPI",
+            "url": "http://api.scraperapi.com",
+            "params": {
+                "api_key": SCRAPERAPI_KEY,
+                "url": target_url,
+                "render": "true",
+                "country_code": "us"
+            }
+        })
+    
+    # 2. ZenRows
+    if ZENROWS_KEY:
+        providers.append({
+            "name": "ZenRows",
+            "url": "https://api.zenrows.com/v1/",
+            "params": {
+                "apikey": ZENROWS_KEY,
+                "url": target_url,
+                "js_render": "true",
+                "premium_proxy": "true"
+            }
+        })
+        
+    # 3. ScrapingBee
+    if SCRAPINGBEE_KEY:
+        providers.append({
+            "name": "ScrapingBee",
+            "url": "https://app.scrapingbee.com/api/v1/",
+            "params": {
+                "api_key": SCRAPINGBEE_KEY,
+                "url": target_url,
+                "render_js": "true",
+                "premium_proxy": "true"
+            }
+        })
+
+    if not providers:
+        raise Exception("No scraping API keys configured")
+
+    last_error = "Unknown error"
+
+    for provider in providers:
+        try:
+            # Scraping APIs with JS rendering can take 10-20 seconds
+            response = requests.get(provider["url"], params=provider["params"], timeout=30)
+            
+            # Check for API-level failures (Out of credits, rate limited, bad key)
+            if response.status_code in [401, 402, 403, 429, 500]:
+                last_error = f"{provider['name']} failed (Status: {response.status_code})"
+                time.sleep(0.5) # Brief pause before trying next provider
+                continue
+            
+            # Check if the API successfully got the page, BUT the page is still a Cloudflare block
+            if response.status_code == 200:
+                text_lower = response.text.lower()
+                if "cf-browser-verification" in text_lower or "just a moment" in text_lower or "captcha" in text_lower:
+                    last_error = f"{provider['name']} returned a Cloudflare block page"
+                    time.sleep(0.5)
+                    continue
+                
+                # Success! We have the real HTML
+                return response.text
+                
+        except requests.exceptions.Timeout:
+            last_error = f"{provider['name']} timed out"
+            continue
+        except Exception as e:
+            last_error = f"{provider['name']} error: {str(e)}"
+            continue
+
+    # If we get here, all providers failed
+    raise Exception(f"All providers failed. Last error: {last_error}")
+
+
 @app.route('/')
 def index():
     return send_file(os.path.join(BASE_DIR, 'index.html'))
 
 @app.route('/api/health')
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "providers_configured": sum([bool(SCRAPERAPI_KEY), bool(ZENROWS_KEY), bool(SCRAPINGBEE_KEY)])})
 
 @app.route('/api/check', methods=['POST', 'GET', 'OPTIONS'])
 def check_amp():
@@ -42,20 +131,6 @@ def check_amp():
     
     results = []
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0'
-    }
-    
     for url in urls:
         url = url.strip()
         if not url:
@@ -64,28 +139,10 @@ def check_amp():
             url = 'https://' + url
         
         try:
-            time.sleep(0.5)
+            # Fetch HTML using the resilient fallback system
+            html_content = fetch_with_fallback(url)
             
-            # UPGRADED: chrome124 has a much better success rate against modern Cloudflare
-            api_key = "d6e07a45-ac7f-41b5-acf3-f3ffbe896130"
-           proxy_url = f"http://proxy.scrapeops.io/v1/?api_key={api_key}&url={url}"
-           
-           # Use standard requests here, ScrapeOps handles the Cloudflare bypass
-           response = requests.get(proxy_url, timeout=15) 
-            
-            # If Cloudflare still blocks it, the status code will be 403
-            if response.status_code == 403:
-                results.append({
-                    "source_url": url,
-                    "amp_url": None,
-                    "status": "error",
-                    "error": "Blocked by Cloudflare/WAF (403)"
-                })
-                continue
-                
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(html_content, 'html.parser')
             amp_tag = soup.find('link', rel='amphtml')
             
             if amp_tag and amp_tag.get('href'):
@@ -100,6 +157,7 @@ def check_amp():
                     "amp_url": None,
                     "status": "not_found"
                 })
+                
         except Exception as e:
             results.append({
                 "source_url": url,
@@ -107,6 +165,9 @@ def check_amp():
                 "status": "error",
                 "error": str(e)
             })
+        
+        # Polite delay between URLs to avoid overwhelming the APIs
+        time.sleep(0.5)
     
     return jsonify({"results": results})
 

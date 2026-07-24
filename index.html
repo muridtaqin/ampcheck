@@ -75,15 +75,19 @@
 
     btn.disabled = true;
     btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Processing...`;
-    statusMsg.textContent = `Processing ${urls.length} URLs. Service may be waking up (30-50s)...`;
-    statusMsg.classList.remove('hidden');
-    tbody.innerHTML = '<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">Scraping in progress...</td></tr>';
+    
+    // Better message so the user knows it's just waking up
+    statusMsg.textContent = `Waking up server and bypassing Cloudflare... This can take up to 60 seconds. Please wait.`;
+    statusMsg.classList.remove('hidden', 'text-red-600');
+    statusMsg.classList.add('text-blue-600');
+    
+    tbody.innerHTML = '<tr><td colspan="3" class="px-4 py-8 text-center text-gray-400">Scraping in progress (do not close this tab)...</td></tr>';
     downloadBtn.classList.add('hidden');
 
     try {
-        // Create an AbortController for timeout
+        // INCREASED TIMEOUT: 120 seconds (2 minutes) to allow for Render wake-up + scraping
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 120000); 
 
         const response = await fetch('/api/check', {
             method: 'POST',
@@ -109,20 +113,20 @@
         renderTable(currentResults);
         downloadBtn.classList.remove('hidden');
         statusMsg.textContent = `Successfully checked ${currentResults.length} URLs.`;
-        statusMsg.classList.remove('text-red-600');
+        statusMsg.classList.remove('text-blue-600');
         
     } catch (error) {
         console.error('Full error:', error);
         
         if (error.name === 'AbortError') {
-            statusMsg.textContent = 'Request timed out (60s). The service might be sleeping. Try again in 30 seconds.';
+            statusMsg.textContent = 'Request timed out (120s). The server took too long. Try again, or check if the API keys are valid.';
         } else if (error.message.includes('Failed to fetch')) {
-            statusMsg.textContent = 'Cannot connect to server. The service is likely sleeping. Wait 30 seconds and refresh the page, then try again.';
+            statusMsg.textContent = 'Cannot connect to server. The service is sleeping. Wait 30 seconds and refresh the page, then try again.';
         } else {
             statusMsg.textContent = `Error: ${error.message}`;
         }
         
-        statusMsg.classList.remove('hidden');
+        statusMsg.classList.remove('hidden', 'text-blue-600');
         statusMsg.classList.add('text-red-600');
     } finally {
         btn.disabled = false;

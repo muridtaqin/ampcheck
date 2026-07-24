@@ -11,8 +11,8 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
-SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "")
+SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "3fa7a3a17dd32d0cb50e2af662b49d5d")
+SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "NBGHXBWL8XKOXHWHA103T6SZDEIYRA3TXXA5NZOHXN4HNJPAA6DLY23DGOZBRO4DF83QWNB59XN3X9U1")
 
 def fetch_with_fallback(target_url):
     """

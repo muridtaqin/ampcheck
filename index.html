@@ -93,10 +93,17 @@
                 downloadBtn.classList.remove('hidden');
                 statusMsg.textContent = `Successfully checked ${currentResults.length} URLs.`;
             } catch (error) {
-                statusMsg.textContent = 'Error connecting to the API. Check console for details.';
-                statusMsg.classList.add('text-red-600');
-                console.error(error);
-            } finally {
+            const errorMsg = error.message || 'Unknown error';
+            statusMsg.textContent = `Error: ${errorMsg}. Check browser console (F12) for details.`;
+            statusMsg.classList.remove('hidden');
+            statusMsg.classList.add('text-red-600');
+            console.error('Full error:', error);
+            
+            // Try to get more details if it's a fetch error
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                statusMsg.textContent = `Network error: Cannot reach the API. The service might be sleeping (Render free tier). Try again in 30 seconds.`;
+            }
+        } finally {
                 btn.disabled = false;
                 btn.innerHTML = 'Check AMP';
             }

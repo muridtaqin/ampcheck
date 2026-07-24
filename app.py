@@ -1,20 +1,34 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 import time
 import os
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Get the absolute path to the project directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    return send_file(os.path.join(BASE_DIR, 'index.html'))
 
-@app.route('/api/check', methods=['POST'])
+@app.route('/api/check', methods=['POST', 'OPTIONS'])
 def check_amp():
-    data = request.get_json()
-    urls = data.get('urls', [])
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data received"}), 400
+        urls = data.get('urls', [])
+    except Exception as e:
+        return jsonify({"error": f"Failed to parse JSON: {str(e)}"}), 400
     
     if not urls:
         return jsonify({"error": "Missing 'urls' array"}), 400
@@ -62,5 +76,11 @@ def check_amp():
     
     return jsonify({"results": results})
 
+# Diagnostic endpoint to test if API is alive
+@app.route('/api/health')
+def health():
+    return jsonify({"status": "ok", "message": "API is running"})
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

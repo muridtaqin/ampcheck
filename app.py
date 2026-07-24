@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from urllib.parse import urljoin
-from curl_cffi import requests # <-- Upgraded to bypass 403 Cloudflare blocks
+from curl_cffi import requests  # <-- Upgraded library
 from bs4 import BeautifulSoup
 import time
 import os
@@ -42,9 +42,8 @@ def check_amp():
     
     results = []
     
-    # Ultra-realistic browser headers
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -65,10 +64,21 @@ def check_amp():
             url = 'https://' + url
         
         try:
-            time.sleep(0.5) # Slightly longer delay to be polite and avoid rate limits
+            time.sleep(0.5)
             
-            # impersonate="chrome110" makes the TLS handshake look exactly like Chrome
-            response = requests.get(url, headers=headers, timeout=15, impersonate="chrome110")
+            # UPGRADED: chrome124 has a much better success rate against modern Cloudflare
+            response = requests.get(url, headers=headers, timeout=15, impersonate="chrome124")
+            
+            # If Cloudflare still blocks it, the status code will be 403
+            if response.status_code == 403:
+                results.append({
+                    "source_url": url,
+                    "amp_url": None,
+                    "status": "error",
+                    "error": "Blocked by Cloudflare/WAF (403)"
+                })
+                continue
+                
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
